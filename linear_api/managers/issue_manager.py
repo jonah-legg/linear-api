@@ -751,7 +751,7 @@ class IssueManager(BaseManager[LinearIssue]):
         return comments
 
     def create_comment(
-        self, issue_id: str, body: str, parent_id: str = None
+        self, issue_id: str, body: str, username: str, parent_id: str = None
     ) -> Comment:
         """
         Create a comment for an issue (or reply to an existing comment).
@@ -778,7 +778,7 @@ class IssueManager(BaseManager[LinearIssue]):
         }
         """
 
-        input_vars = {"input": {"body": body, "issueId": issue_id}}
+        input_vars = {"input": {"body": body, "issueId": issue_id, "createAsUser": username if username is not None else ""}}
         if parent_id is not None:
             input_vars["input"]["parentId"] = parent_id
 
