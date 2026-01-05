@@ -5,6 +5,7 @@ This module provides the IssueManager class for working with Linear issues.
 """
 
 import json
+import aiohttp
 from datetime import datetime
 from typing import Any, Dict, List
 from urllib.parse import urlparse
