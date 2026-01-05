@@ -854,11 +854,11 @@ class IssueManager(BaseManager[LinearIssue]):
             async with session.put(
                 upload_info['uploadUrl'], 
                 headers=headers, 
-                data=file_data
-            ) as response:
-                if response.status not in (200, 201):
-                    raise Exception(f"Upload failed with status {response.status}")
-
+                data=file_data,
+                timeout=aiohttp.ClientTimeout(total=300)
+            ) as upload_response:
+                if upload_response.status not in (200, 201):
+                    raise ValueError(f"Upload failed with status {upload_response.status}")
         return upload_info['assetUrl']
 
     def get_children(self, issue_id: str) -> Dict[str, LinearIssue]:
