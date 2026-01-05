@@ -6,21 +6,23 @@ This module provides the IssueManager class for working with Linear issues.
 
 import json
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Any, Dict, List
 from urllib.parse import urlparse
 
-from .base_manager import BaseManager
-from ..domain import IssueRelation, CustomerNeedResponse
 from ..domain import (
+    Comment,
+    CustomerNeedResponse,
+    IssueRelation,
+    LinearAttachmentInput,
     LinearIssue,
     LinearIssueInput,
     LinearIssueUpdateInput,
-    LinearAttachmentInput,
     LinearPriority,
-    Comment,
-    LinearUser, Reaction
+    LinearUser,
+    Reaction,
 )
-from ..utils import process_issue_data, enrich_with_client
+from ..utils import enrich_with_client, process_issue_data
+from .base_manager import BaseManager
 
 
 class IssueManager(BaseManager[LinearIssue]):
@@ -181,7 +183,11 @@ class IssueManager(BaseManager[LinearIssue]):
         # Create the issue
         response = self._execute_query(mutation, {"input": input_vars})
 
-        if not response or "issueCreate" not in response or not response["issueCreate"]["issue"]:
+        if (
+            not response
+            or "issueCreate" not in response
+            or not response["issueCreate"]["issue"]
+        ):
             raise ValueError(f"Failed to create issue '{issue.title}'")
 
         new_issue_id = response["issueCreate"]["issue"]["id"]
@@ -241,7 +247,9 @@ class IssueManager(BaseManager[LinearIssue]):
 
         try:
             current_issue = self.get(issue_id)
-            parent_id = current_issue.parentId if hasattr(current_issue, 'parentId') else None
+            parent_id = (
+                current_issue.parentId if hasattr(current_issue, "parentId") else None
+            )
             old_state_id = current_issue.state.id if current_issue.state else None
         except ValueError:
             parent_id = None
@@ -253,7 +261,11 @@ class IssueManager(BaseManager[LinearIssue]):
         # Update the issue
         response = self._execute_query(mutation, {"id": issue_id, "input": input_vars})
 
-        if not response or "issueUpdate" not in response or not response["issueUpdate"]["success"]:
+        if (
+            not response
+            or "issueUpdate" not in response
+            or not response["issueUpdate"]["success"]
+        ):
             raise ValueError(f"Failed to update issue with ID: {issue_id}")
 
         self._cache_invalidate("issues_by_id", issue_id)
@@ -287,7 +299,11 @@ class IssueManager(BaseManager[LinearIssue]):
 
         updated_issue = self.get(issue_id)
 
-        if old_state_id and updated_issue.state and old_state_id != updated_issue.state.id:
+        if (
+            old_state_id
+            and updated_issue.state
+            and old_state_id != updated_issue.state.id
+        ):
             if updated_issue.team and updated_issue.team.id:
                 self._cache_clear("states_by_team_id")
                 self._cache_clear("states_by_team_id_True")
@@ -378,9 +394,7 @@ class IssueManager(BaseManager[LinearIssue]):
 
         # Get all issue IDs for this team using our improved pagination method
         issue_objects = self._handle_pagination(
-            query,
-            {"teamId": team_id},
-            ["issues", "nodes"]
+            query, {"teamId": team_id}, ["issues", "nodes"]
         )
 
         # Convert to dictionary of ID -> LinearIssue
@@ -432,9 +446,7 @@ class IssueManager(BaseManager[LinearIssue]):
 
         # Get all issue IDs for this project using our improved pagination method
         issue_objects = self._handle_pagination(
-            query,
-            {"projectId": project_id},
-            ["project", "issues", "nodes"]
+            query, {"projectId": project_id}, ["project", "issues", "nodes"]
         )
 
         # Convert to dictionary of ID -> LinearIssue
@@ -480,11 +492,7 @@ class IssueManager(BaseManager[LinearIssue]):
         """
 
         # Get all issue IDs using our improved pagination method
-        issue_objects = self._handle_pagination(
-            query,
-            {},
-            ["issues", "nodes"]
-        )
+        issue_objects = self._handle_pagination(query, {}, ["issues", "nodes"])
 
         # Convert to dictionary of ID -> LinearIssue
         issues = {}
@@ -492,9 +500,10 @@ class IssueManager(BaseManager[LinearIssue]):
         all_issue_ids = [issue["id"] for issue in issue_objects]
 
         for i in range(0, len(all_issue_ids), batch_size):
-            batch = all_issue_ids[i:i + batch_size]
+            batch = all_issue_ids[i : i + batch_size]
             print(
-                f"Processing batch {i // batch_size + 1}/{(len(all_issue_ids) - 1) // batch_size + 1} ({len(batch)} issues)")
+                f"Processing batch {i // batch_size + 1}/{(len(all_issue_ids) - 1) // batch_size + 1} ({len(batch)} issues)"
+            )
 
             for issue_id in batch:
                 try:
@@ -525,7 +534,7 @@ class IssueManager(BaseManager[LinearIssue]):
                 return False
             try:
                 result = urlparse(url)
-                return all([result.scheme in ['http', 'https'], result.netloc])
+                return all([result.scheme in ["http", "https"], result.netloc])
             except:
                 return False
 
@@ -619,10 +628,7 @@ class IssueManager(BaseManager[LinearIssue]):
             return []
 
         attachments = self._extract_and_cache(
-            response,
-            ["issue", "attachments"],
-            "attachments_by_issue",
-            issue_id
+            response, ["issue", "attachments"], "attachments_by_issue", issue_id
         )
 
         return attachments
@@ -680,10 +686,7 @@ class IssueManager(BaseManager[LinearIssue]):
             return []
 
         history = self._extract_and_cache(
-            response,
-            ["issue", "history"],
-            "history_by_issue",
-            issue_id
+            response, ["issue", "history"], "history_by_issue", issue_id
         )
 
         return history
@@ -738,13 +741,124 @@ class IssueManager(BaseManager[LinearIssue]):
             query,
             {"issueId": issue_id},
             ["issue", "comments", "nodes"],
-            Comment  # Pass the model class for automatic conversion
+            Comment,  # Pass the model class for automatic conversion
         )
 
         # Cache the result
         self._cache_set("comments_by_issue", issue_id, comments)
 
         return comments
+
+    def create_comment(
+        self, issue_id: str, body: str, parent_id: str = None
+    ) -> Comment:
+        """
+        Create a comment for an issue (or reply to an existing comment).
+
+        Args:
+            issue_id: The ID of the issue to comment on
+            body: The text body of the comment
+            parent_id: Optional ID of the parent comment to reply to
+
+        Returns:
+            The created Comment object
+        """
+        mutation = """
+        mutation CreateComment($input: CommentCreateInput!) {
+          commentCreate(input: $input) {
+            success
+            comment {
+              id
+              body
+              createdAt
+              updatedAt
+            }
+          }
+        }
+        """
+
+        input_vars = {"input": {"body": body, "issueId": issue_id}}
+        if parent_id is not None:
+            input_vars["input"]["parentId"] = parent_id
+
+        response = self._execute_query(mutation, input_vars)
+
+        if (
+            not response
+            or "commentCreate" not in response
+            or not response["commentCreate"].get("comment")
+        ):
+            raise ValueError(f"Failed to create comment for issue {issue_id}")
+
+        comment_data = response["commentCreate"]["comment"]
+
+        # Invalidate cache for issue comments
+        self._cache_invalidate("comments_by_issue", issue_id)
+
+        return Comment(**comment_data)
+
+    async def file_upload(self, file_data: bytes, content_type: str, filename: str) -> str:
+        """
+        Upload a file to Linear.
+
+        Args:
+            file_data: The binary content of the file
+            content_type: The MIME type of the file (e.g., 'image/jpeg')
+            filename: The name of the file
+
+        Returns:
+            str: The final asset URL for the uploaded file
+        """
+        mutation = """
+        mutation fileUpload($contentType: String!, $filename: String!, $size: Int!) {
+            fileUpload(contentType: $contentType, filename: $filename, size: $size) {
+                success
+                uploadFile {
+                    uploadUrl
+                    assetUrl
+                    headers {
+                        key
+                        value
+                    }
+                }
+            }
+        }
+        """
+
+        variables = {
+            "contentType": content_type,
+            "filename": filename,
+            "size": len(file_data)
+        }
+
+        response = self._execute_query(mutation, variables)
+
+        if (
+            not response
+            or "fileUpload" not in response
+            or not response["fileUpload"].get("uploadFile")
+        ):
+            raise ValueError("Failed to get file upload URL")
+
+        upload_info = response["fileUpload"]["uploadFile"]
+
+        headers = {
+            'Content-Type': content_type,
+            'Cache-Control': 'public, max-age=31536000'
+        }
+        for header in upload_info['headers']:
+            headers[header['key']] = header['value']
+
+        async with aiohttp.ClientSession() as session:
+            async with session.put(
+                upload_info['uploadUrl'], 
+                headers=headers, 
+                data=file_data
+            ) as response:
+                if response.status not in (200, 201):
+                    raise Exception(f"Upload failed with status {response.status}")
+
+        return upload_info['assetUrl']
 
     def get_children(self, issue_id: str) -> Dict[str, LinearIssue]:
         """
@@ -777,9 +891,7 @@ class IssueManager(BaseManager[LinearIssue]):
 
         # Use our improved pagination method
         issue_nodes = self._handle_pagination(
-            query,
-            {"parentId": issue_id},
-            ["issues", "nodes"]
+            query, {"parentId": issue_id}, ["issues", "nodes"]
         )
 
         # Convert to dictionary of ID -> LinearIssue
@@ -830,9 +942,13 @@ class IssueManager(BaseManager[LinearIssue]):
         """
 
         response = self._execute_query(query, {"issueId": issue_id})
-        if not response or "issue" not in response or not response["issue"] or "reactions" not in response["issue"]:
+        if (
+            not response
+            or "issue" not in response
+            or not response["issue"]
+            or "reactions" not in response["issue"]
+        ):
             return []
-
 
         reactions = []
         for reaction_data in response["issue"]["reactions"]:
@@ -893,7 +1009,7 @@ class IssueManager(BaseManager[LinearIssue]):
             query,
             {"issueId": issue_id},
             ["issue", "subscribers", "nodes"],
-            LinearUser  # Pass the model class for automatic conversion
+            LinearUser,  # Pass the model class for automatic conversion
         )
 
         # Cache the result
@@ -939,8 +1055,13 @@ class IssueManager(BaseManager[LinearIssue]):
         """
 
         response = self._execute_query(query, {"issueId": issue_id})
-        if not response or "issue" not in response or not response["issue"] or "relations" not in response[
-            "issue"] or "nodes" not in response["issue"]["relations"]:
+        if (
+            not response
+            or "issue" not in response
+            or not response["issue"]
+            or "relations" not in response["issue"]
+            or "nodes" not in response["issue"]["relations"]
+        ):
             return []
 
         relations = []
@@ -970,7 +1091,7 @@ class IssueManager(BaseManager[LinearIssue]):
         if cached_relations:
             return cached_relations
 
-        # Запрос для inverseRelations, который является Connection
+        # Query for inverseRelations, which is a Connection
         query = """
         query($issueId: String!) {
           issue(id: $issueId) {
@@ -995,8 +1116,13 @@ class IssueManager(BaseManager[LinearIssue]):
 
         response = self._execute_query(query, {"issueId": issue_id})
 
-        if not response or "issue" not in response or not response["issue"] or "inverseRelations" not in response[
-            "issue"] or "nodes" not in response["issue"]["inverseRelations"]:
+        if (
+            not response
+            or "issue" not in response
+            or not response["issue"]
+            or "inverseRelations" not in response["issue"]
+            or "nodes" not in response["issue"]["inverseRelations"]
+        ):
             return []
 
         relations = []
@@ -1052,8 +1178,13 @@ class IssueManager(BaseManager[LinearIssue]):
 
         response = self._execute_query(query, {"issueId": issue_id})
 
-        if not response or "issue" not in response or not response["issue"] or "needs" not in response[
-            "issue"] or "nodes" not in response["issue"]["needs"]:
+        if (
+            not response
+            or "issue" not in response
+            or not response["issue"]
+            or "needs" not in response["issue"]
+            or "nodes" not in response["issue"]["needs"]
+        ):
             return []
 
         needs = []
@@ -1098,8 +1229,7 @@ class IssueManager(BaseManager[LinearIssue]):
         """
 
         response = self._execute_query(
-            mutation,
-            {"id": child_id, "input": {"parentId": parent_id}}
+            mutation, {"id": child_id, "input": {"parentId": parent_id}}
         )
 
         # Invalidate caches for both parent and child issues
@@ -1108,7 +1238,9 @@ class IssueManager(BaseManager[LinearIssue]):
 
         return response
 
-    def _build_issue_input_vars(self, issue: LinearIssueInput, team_id: str) -> Dict[str, Any]:
+    def _build_issue_input_vars(
+        self, issue: LinearIssueInput, team_id: str
+    ) -> Dict[str, Any]:
         """
         Build input variables for creating an issue.
 
@@ -1158,8 +1290,13 @@ class IssueManager(BaseManager[LinearIssue]):
 
         # Handle additional fields
         optional_fields = [
-            "descriptionData", "subscriberIds", "sortOrder", "prioritySortOrder",
-            "subIssueSortOrder", "displayIconUrl", "preserveSortOrderOnCreate"
+            "descriptionData",
+            "subscriberIds",
+            "sortOrder",
+            "prioritySortOrder",
+            "subIssueSortOrder",
+            "displayIconUrl",
+            "preserveSortOrderOnCreate",
         ]
 
         for field in optional_fields:
@@ -1180,7 +1317,9 @@ class IssueManager(BaseManager[LinearIssue]):
 
         return input_vars
 
-    def _build_issue_update_vars(self, issue_id: str, update_data: LinearIssueUpdateInput) -> Dict[str, Any]:
+    def _build_issue_update_vars(
+        self, issue_id: str, update_data: LinearIssueUpdateInput
+    ) -> Dict[str, Any]:
         """
         Build input variables for updating an issue.
 
@@ -1192,7 +1331,9 @@ class IssueManager(BaseManager[LinearIssue]):
             Input variables for the GraphQL mutation
         """
         # Convert the Pydantic model to a dictionary, excluding None values
-        update_dict = {k: v for k, v in update_data.model_dump().items() if v is not None}
+        update_dict = {
+            k: v for k, v in update_data.model_dump().items() if v is not None
+        }
 
         # Build the input variables
         input_vars = {}
@@ -1209,20 +1350,33 @@ class IssueManager(BaseManager[LinearIssue]):
 
         # Handle stateName conversion
         if "stateName" in update_dict and team_id:
-            state_id = self.client.teams.get_state_id_by_name(update_dict.pop("stateName"), team_id)
+            state_id = self.client.teams.get_state_id_by_name(
+                update_dict.pop("stateName"), team_id
+            )
             input_vars["stateId"] = state_id
 
         # Handle projectName conversion
         if "projectName" in update_dict and team_id:
-            project_id = self.client.projects.get_id_by_name(update_dict.pop("projectName"), team_id)
+            project_id = self.client.projects.get_id_by_name(
+                update_dict.pop("projectName"), team_id
+            )
             input_vars["projectId"] = project_id
 
         # Handle priority as an enum value
-        if "priority" in update_dict and isinstance(update_dict["priority"], LinearPriority):
+        if "priority" in update_dict and isinstance(
+            update_dict["priority"], LinearPriority
+        ):
             input_vars["priority"] = update_dict.pop("priority").value
 
         # Handle datetime fields
-        datetime_fields = ["dueDate", "createdAt", "slaBreachesAt", "slaStartedAt", "snoozedUntilAt", "completedAt"]
+        datetime_fields = [
+            "dueDate",
+            "createdAt",
+            "slaBreachesAt",
+            "slaStartedAt",
+            "snoozedUntilAt",
+            "completedAt",
+        ]
         for field in datetime_fields:
             if field in update_dict and isinstance(update_dict[field], datetime):
                 input_vars[field] = update_dict.pop(field).isoformat()
